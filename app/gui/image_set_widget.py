@@ -1,6 +1,7 @@
 import numpy as np
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QGraphicsPixmapItem,
     QGraphicsScene,
     QGraphicsView,
@@ -49,11 +50,22 @@ class ImageSetWidget(QWidget):
 
         self.info_label = QLabel("Aucun jeu d'images chargé")
 
+        self.whole_image_check = QCheckBox("Toujours prendre l'image entière")
+        self.whole_image_check.setToolTip(
+            "Ignore le cadre de recadrage et envoie l'image entière à l'OCR pour "
+            "chaque sous-titre, plutôt que la zone sélectionnée. Utile pour les "
+            ".sup/.idx dont chaque image est déjà recadrée par le format autour du "
+            "sous-titre, avec une position et une taille qui varient d'une image à "
+            "l'autre."
+        )
+        self.whole_image_check.toggled.connect(self._on_whole_image_toggled)
+
         controls = QHBoxLayout()
         controls.addWidget(self.prev_button)
         controls.addWidget(self.next_button)
         controls.addWidget(self.info_label)
         controls.addStretch(1)
+        controls.addWidget(self.whole_image_check)
 
         preview_col = QVBoxLayout()
         preview_col.addWidget(self.view, stretch=1)
@@ -90,6 +102,7 @@ class ImageSetWidget(QWidget):
             bounds = QRectF(0, 0, reader.width, reader.height)
             self.crop_item = CropRectItem(bounds)
             self.crop_item.signals.changed.connect(self.frameChanged.emit)
+            self.crop_item.setVisible(not self.whole_image_check.isChecked())
             self.scene.addItem(self.crop_item)
 
         has_events = bool(reader.events)
@@ -137,11 +150,16 @@ class ImageSetWidget(QWidget):
         if row >= 0:
             self.show_index(row)
 
+    def _on_whole_image_toggled(self, checked):
+        if self.crop_item is not None:
+            self.crop_item.setVisible(not checked)
+        self.frameChanged.emit()
+
     def get_current_frame(self):
         return self._last_frame
 
     def get_crop_rect_norm(self):
-        if self.crop_item is None:
+        if self.whole_image_check.isChecked() or self.crop_item is None:
             return (0.0, 0.0, 1.0, 1.0)
         return self.crop_item.normalized_rect()
 

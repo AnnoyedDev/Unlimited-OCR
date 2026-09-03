@@ -95,8 +95,8 @@ def install_torch(python_exe: Path, device: str, rocm_tag: str | None) -> None:
         return
 
     if device == "cuda":
-        print("Installing default (CUDA-enabled) torch build from PyPI.")
-        run(base + torch_pkgs)
+        print("Installing CUDA-enabled torch build (auto-detecting local CUDA driver)...")
+        run(base + torch_pkgs + ["--torch-backend=auto"])
         return
 
     if device == "rocm":
