@@ -97,6 +97,13 @@ source .venv/bin/activate
 python -m app.main
 ```
 
+## Spé. ⚠️ Notes importantes ⚠️
+Lors de l'utilisation du logiciel, pensez à baisser la taille du batch OCR en fonction de votre VRAM : 
+- 8Go et moins : 1
+- 12Go et moins : 2
+- 12 - 20 Go : 3
+- 20Go et plus : 4
+
 ## 4. Utiliser l'interface
 
 1. **Fichier → Ouvrir une vidéo...** (ou le bouton correspondant).
