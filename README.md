@@ -100,7 +100,7 @@ python -m app.main
 ## Spé. ⚠️ Notes importantes ⚠️
 Lors de l'utilisation du logiciel, pensez à baisser la taille du batch OCR en fonction de votre VRAM : 
 - 8Go et moins : 1
-- 8Go - 12Go et moins : 2
+- 8Go - 12Go : 2
 - 12Go - 20Go : 3
 - 20Go et plus : 4
 
