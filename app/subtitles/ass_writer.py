@@ -64,6 +64,8 @@ def write_ass(
         start = _format_timestamp(cue.start)
         end = _format_timestamp(cue.end)
         text = _escape_text(cue.text)
+        if cue.italic:
+            text = f"{{\\i1}}{text}{{\\i0}}"
         lines.append(f"Dialogue: 0,{start},{end},{style_name},,0,0,0,,{text}")
 
     with open(output_path, "w", encoding="utf-8-sig", newline="\r\n") as f:

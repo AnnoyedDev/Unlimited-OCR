@@ -15,6 +15,7 @@ dependencies = [
                    # statically requires every top-level import in modeling_unlimitedocr.py
     "opencv-python-headless",
     "PySide6",
+    "psutil",
 ]
 # torch / torchvision are installed separately by install.py, since the
 # correct build (CUDA / ROCm / CPU) depends on the host OS and GPU vendor.

@@ -9,6 +9,8 @@ from PIL import Image, ImageOps
 from transformers import AutoModel, AutoTokenizer
 
 from .config import (
+    DEFAULT_CROP_MAX_TILES,
+    DEFAULT_CROP_MIN_TILES,
     DEFAULT_MAX_NEW_TOKENS,
     DEFAULT_NGRAM_WINDOW,
     DEFAULT_NO_REPEAT_NGRAM_SIZE,
@@ -39,7 +41,7 @@ def strip_det_markup(text):
                 blocks.append(content)
         else:
             blocks.append(line)
-    return "\n".join(blocks).strip()
+    return "\n".join(blocks).strip().replace("\\n", "\\N")
 
 
 IMAGE_TOKEN = "<image>"
@@ -96,7 +98,9 @@ class OcrEngine:
             ngram_processor_cls=mod.SlidingWindowNoRepeatNgramProcessor,
         )
 
-    def _prepare_sample(self, image, prompt, base_size, image_size, crop_mode):
+    def _prepare_sample(
+        self, image, prompt, base_size, image_size, crop_mode, crop_min_tiles, crop_max_tiles
+    ):
         model_dtype = self.device_info.dtype
         image = image.convert("RGB")
 
@@ -121,7 +125,9 @@ class OcrEngine:
             images_seq_mask += [False] * len(tokenized_sep)
 
             if crop_mode and not (img.size[0] <= 640 and img.size[1] <= 640):
-                images_crop_raw, crop_ratio = self.dynamic_preprocess(img)
+                images_crop_raw, crop_ratio = self.dynamic_preprocess(
+                    img, min_num=crop_min_tiles, max_num=crop_max_tiles
+                )
             else:
                 images_crop_raw, crop_ratio = [], [1, 1]
 
@@ -178,6 +184,8 @@ class OcrEngine:
         base_size=1024,
         image_size=640,
         crop_mode=True,
+        crop_min_tiles=DEFAULT_CROP_MIN_TILES,
+        crop_max_tiles=DEFAULT_CROP_MAX_TILES,
         max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
         no_repeat_ngram_size=DEFAULT_NO_REPEAT_NGRAM_SIZE,
         ngram_window=DEFAULT_NGRAM_WINDOW,
@@ -189,7 +197,12 @@ class OcrEngine:
         device = self.device_info.device
         model_dtype = self.device_info.dtype
 
-        samples = [self._prepare_sample(img, prompt, base_size, image_size, crop_mode) for img in images]
+        samples = [
+            self._prepare_sample(
+                img, prompt, base_size, image_size, crop_mode, crop_min_tiles, crop_max_tiles
+            )
+            for img in images
+        ]
 
         pad_id = self.tokenizer.pad_token_id
         if pad_id is None:

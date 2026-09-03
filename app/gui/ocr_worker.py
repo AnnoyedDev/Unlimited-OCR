@@ -2,10 +2,12 @@ import copy
 
 from PySide6.QtCore import QObject, Signal
 
+from ..batch_advisor import finish_measurement, start_measurement
 from ..config import DEFAULT_OCR_PROMPT
 from ..subtitles.builder import AnalyzedFrame
 from ..subtitles.lang_filter import looks_like_unwanted_chinese
 from ..video.filters import FilterPipeline
+from ..video.italic import DEFAULT_ANGLE_THRESHOLD_DEG, detect_italic
 from ..video.reader import VideoReader, crop_frame
 from ..video.similarity import DuplicateSkipper
 from ..video.textbox import find_bright_text_bbox, looks_like_garbage, prepare_retry_crop
@@ -35,6 +37,7 @@ class OcrWorker(QObject):
     finished = Signal(list)
     error = Signal(str)
     status = Signal(str)
+    memoryCalibrated = Signal(float)
 
     def __init__(
         self,
@@ -50,6 +53,8 @@ class OcrWorker(QObject):
         scan_by_interval=False,
         batch_size=4,
         retry_on_empty=True,
+        detect_italic=False,
+        italic_angle_threshold=DEFAULT_ANGLE_THRESHOLD_DEG,
         parent=None,
     ):
         super().__init__(parent)
@@ -65,7 +70,10 @@ class OcrWorker(QObject):
         self.scan_by_interval = scan_by_interval
         self.batch_size = max(1, batch_size)
         self.retry_on_empty = retry_on_empty
+        self.detect_italic = detect_italic
+        self.italic_angle_threshold = italic_angle_threshold
         self._stop_requested = False
+        self._calibrated = False
 
     def stop(self):
         self._stop_requested = True
@@ -91,7 +99,15 @@ class OcrWorker(QObject):
             def flush_batch():
                 if not pending_images:
                     return
+                measuring = not self._calibrated
+                if measuring:
+                    baseline = start_measurement(engine.device_info)
                 texts = engine.ocr_images_batch(list(pending_images), prompt=self.prompt)
+                if measuring:
+                    used = finish_measurement(engine.device_info, baseline)
+                    self._calibrated = True
+                    if used > 0:
+                        self.memoryCalibrated.emit(used / len(pending_images))
 
                 if self.retry_on_empty:
                     retry_positions, retry_images = [], []
@@ -111,10 +127,11 @@ class OcrWorker(QObject):
                             if retry_text and not looks_like_garbage(retry_text):
                                 texts[pos] = retry_text
 
-                for (idx, ts), text in zip(pending_meta, texts):
+                for (idx, ts), text, raw_crop in zip(pending_meta, texts, pending_raw_crops):
                     if self.filter_chinese and looks_like_unwanted_chinese(text):
                         text = ""
-                    analyzed = AnalyzedFrame(idx, ts, text=text)
+                    italic = self.detect_italic and detect_italic(raw_crop, self.italic_angle_threshold)
+                    analyzed = AnalyzedFrame(idx, ts, text=text, italic=italic)
                     results.append(analyzed)
                     self.frameResult.emit(analyzed)
                 pending_meta.clear()
@@ -168,6 +185,7 @@ class ImageSetOcrWorker(QObject):
     finished = Signal(list)
     error = Signal(str)
     status = Signal(str)
+    memoryCalibrated = Signal(float)
 
     def __init__(
         self,
@@ -180,6 +198,8 @@ class ImageSetOcrWorker(QObject):
         filter_chinese=True,
         batch_size=4,
         retry_on_empty=True,
+        detect_italic=False,
+        italic_angle_threshold=DEFAULT_ANGLE_THRESHOLD_DEG,
         parent=None,
     ):
         super().__init__(parent)
@@ -192,7 +212,10 @@ class ImageSetOcrWorker(QObject):
         self.filter_chinese = filter_chinese
         self.batch_size = max(1, batch_size)
         self.retry_on_empty = retry_on_empty
+        self.detect_italic = detect_italic
+        self.italic_angle_threshold = italic_angle_threshold
         self._stop_requested = False
+        self._calibrated = False
 
     def stop(self):
         self._stop_requested = True
@@ -215,8 +238,8 @@ class ImageSetOcrWorker(QObject):
             pending_images = []
             pending_raw_crops = []
 
-            def emit_result(idx, ts, text, gap_end):
-                analyzed = AnalyzedFrame(idx, ts, text=text)
+            def emit_result(idx, ts, text, gap_end, italic=False):
+                analyzed = AnalyzedFrame(idx, ts, text=text, italic=italic)
                 results.append(analyzed)
                 self.frameResult.emit(analyzed)
                 if gap_end is not None:
@@ -225,7 +248,15 @@ class ImageSetOcrWorker(QObject):
             def flush_batch():
                 if not pending_images:
                     return
+                measuring = not self._calibrated
+                if measuring:
+                    baseline = start_measurement(engine.device_info)
                 texts = engine.ocr_images_batch(list(pending_images), prompt=self.prompt)
+                if measuring:
+                    used = finish_measurement(engine.device_info, baseline)
+                    self._calibrated = True
+                    if used > 0:
+                        self.memoryCalibrated.emit(used / len(pending_images))
 
                 if self.retry_on_empty:
                     retry_positions, retry_images = [], []
@@ -245,10 +276,11 @@ class ImageSetOcrWorker(QObject):
                             if retry_text and not looks_like_garbage(retry_text):
                                 texts[pos] = retry_text
 
-                for (idx, ts, gap_end), text in zip(pending_meta, texts):
+                for (idx, ts, gap_end), text, raw_crop in zip(pending_meta, texts, pending_raw_crops):
                     if self.filter_chinese and looks_like_unwanted_chinese(text):
                         text = ""
-                    emit_result(idx, ts, text, gap_end)
+                    italic = self.detect_italic and detect_italic(raw_crop, self.italic_angle_threshold)
+                    emit_result(idx, ts, text, gap_end, italic=italic)
                 pending_meta.clear()
                 pending_images.clear()
                 pending_raw_crops.clear()

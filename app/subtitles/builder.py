@@ -5,17 +5,19 @@ DEFAULT_TEXT_SIMILARITY_THRESHOLD = 0.85
 
 
 class AnalyzedFrame:
-    def __init__(self, index, timestamp, text):
+    def __init__(self, index, timestamp, text, italic=False):
         self.index = index
         self.timestamp = timestamp
         self.text = text
+        self.italic = italic
 
 
 class SubtitleCue:
-    def __init__(self, start, end, text):
+    def __init__(self, start, end, text, italic=False):
         self.start = start
         self.end = end
         self.text = text
+        self.italic = italic
 
 
 def _similar(a, b, threshold):
@@ -41,14 +43,19 @@ def build_cues(
 
     cues = []
     current_variants = []
+    current_italic_votes = []
     current_start = 0.0
     last_timestamp = 0.0
 
     def close_cue(end_ts):
-        nonlocal current_variants
+        nonlocal current_variants, current_italic_votes
         if current_variants:
-            cues.append(SubtitleCue(current_start, end_ts, _pick_representative(current_variants)))
+            italic = sum(current_italic_votes) * 2 > len(current_italic_votes)
+            cues.append(
+                SubtitleCue(current_start, end_ts, _pick_representative(current_variants), italic=italic)
+            )
         current_variants = []
+        current_italic_votes = []
 
     for frame in frames:
         if frame.text is not None:
@@ -58,15 +65,18 @@ def build_cues(
                 if normalized:
                     current_start = frame.timestamp
                     current_variants.append(normalized)
+                    current_italic_votes.append(frame.italic)
             else:
                 anchor = current_variants[0]
                 if normalized and _similar(normalized, anchor, text_similarity_threshold):
                     current_variants.append(normalized)
+                    current_italic_votes.append(frame.italic)
                 else:
                     close_cue(frame.timestamp)
                     if normalized:
                         current_start = frame.timestamp
                         current_variants.append(normalized)
+                        current_italic_votes.append(frame.italic)
 
         last_timestamp = frame.timestamp
 

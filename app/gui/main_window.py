@@ -96,10 +96,13 @@ class MainWindow(QMainWindow):
 
     def _show_device_info(self):
         try:
+            from ..batch_advisor import detect_capacity
             from ..device import detect_device
 
             info = detect_device()
             self.controls_panel.set_device_text(f"Device : {info}")
+            free_bytes, total_bytes = detect_capacity(info)
+            self.controls_panel.set_memory_capacity(free_bytes, total_bytes, info.is_gpu)
         except Exception as exc:
             self.controls_panel.set_device_text(f"Device : indisponible ({exc})")
 
@@ -211,6 +214,8 @@ class MainWindow(QMainWindow):
                 filter_chinese=self.controls_panel.filter_chinese_check.isChecked(),
                 batch_size=self.controls_panel.batch_size_spin.value(),
                 retry_on_empty=self.controls_panel.retry_on_empty_check.isChecked(),
+                detect_italic=self.controls_panel.italic_check.isChecked(),
+                italic_angle_threshold=self.controls_panel.italic_threshold_spin.value(),
             )
         else:
             worker = OcrWorker(
@@ -226,6 +231,8 @@ class MainWindow(QMainWindow):
                 scan_by_interval=self.controls_panel.scan_by_interval_check.isChecked(),
                 batch_size=self.controls_panel.batch_size_spin.value(),
                 retry_on_empty=self.controls_panel.retry_on_empty_check.isChecked(),
+                detect_italic=self.controls_panel.italic_check.isChecked(),
+                italic_angle_threshold=self.controls_panel.italic_threshold_spin.value(),
             )
         thread = QThread(self)
         worker.moveToThread(thread)
@@ -236,6 +243,7 @@ class MainWindow(QMainWindow):
         worker.status.connect(self.controls_panel.set_status)
         worker.finished.connect(self._on_run_finished)
         worker.error.connect(self._on_run_error)
+        worker.memoryCalibrated.connect(self.controls_panel.set_batch_cost_estimate)
 
         self._thread = thread
         self._worker = worker

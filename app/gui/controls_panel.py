@@ -1,20 +1,23 @@
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QProgressBar,
     QPushButton,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from ..config import DEFAULT_OCR_PROMPT
+from ..video.italic import DEFAULT_ANGLE_THRESHOLD_DEG
 
 
 class ControlsPanel(QWidget):
@@ -78,6 +81,10 @@ class ControlsPanel(QWidget):
         self.force_periodic_check.toggled.connect(self._update_n_frames_enabled)
         form.addRow("  Intervalle (N frames) :", self.n_frames_spin)
 
+        self._free_bytes = None
+        self._is_gpu = True
+        self._bytes_per_item = None
+
         self.batch_size_spin = QSpinBox()
         self.batch_size_spin.setRange(1, 32)
         self.batch_size_spin.setValue(4)
@@ -88,7 +95,27 @@ class ControlsPanel(QWidget):
             "longtemps entre deux résultats affichés (le batch se remplit avant "
             "d'être envoyé). 1 = désactive le batching (comportement d'origine)."
         )
-        form.addRow("Taille du batch OCR :", self.batch_size_spin)
+        self.batch_size_spin.valueChanged.connect(self._on_batch_spin_changed)
+
+        self.batch_size_slider = QSlider(Qt.Horizontal)
+        self.batch_size_slider.setRange(1, 32)
+        self.batch_size_slider.setValue(4)
+        self.batch_size_slider.valueChanged.connect(self._on_batch_slider_changed)
+
+        batch_row = QHBoxLayout()
+        batch_row.addWidget(self.batch_size_slider, 1)
+        batch_row.addWidget(self.batch_size_spin)
+        form.addRow("Taille du batch OCR :", batch_row)
+
+        self.batch_risk_label = QLabel()
+        self.batch_risk_label.setWordWrap(True)
+        self.batch_risk_label.setToolTip(
+            "Estimation de la mémoire (VRAM ou RAM selon le device) que prendrait ce "
+            "batch, calibrée sur la mesure réelle du premier lot OCR de la session en "
+            "cours. Indisponible tant qu'aucun OCR n'a encore tourné."
+        )
+        form.addRow(self.batch_risk_label)
+        self._update_batch_risk()
 
         self.text_merge_spin = QDoubleSpinBox()
         self.text_merge_spin.setRange(0.0, 100.0)
@@ -142,6 +169,29 @@ class ControlsPanel(QWidget):
         )
         ocr_form.addRow(self.retry_on_empty_check)
 
+        self.italic_check = QCheckBox("Détecter les italiques (expérimental)")
+        self.italic_check.setChecked(False)
+        self.italic_check.setToolTip(
+            "Estime l'inclinaison du texte sur l'image recadrée pour détecter "
+            "l'italique et l'entourer de {\\i1}...{\\i0} dans l'export .ass. "
+            "Heuristique approximative -- peu fiable sur du texte court ou des "
+            "polices stylisées."
+        )
+        self.italic_check.toggled.connect(lambda checked: self.italic_threshold_spin.setEnabled(checked))
+        ocr_form.addRow(self.italic_check)
+
+        self.italic_threshold_spin = QDoubleSpinBox()
+        self.italic_threshold_spin.setRange(1.0, 45.0)
+        self.italic_threshold_spin.setDecimals(1)
+        self.italic_threshold_spin.setValue(DEFAULT_ANGLE_THRESHOLD_DEG)
+        self.italic_threshold_spin.setSuffix(" °")
+        self.italic_threshold_spin.setEnabled(False)
+        self.italic_threshold_spin.setToolTip(
+            "Angle d'inclinaison minimum (par rapport à la verticale) à partir "
+            "duquel le texte est considéré comme italique."
+        )
+        ocr_form.addRow("  Seuil d'inclinaison :", self.italic_threshold_spin)
+
         layout.addWidget(ocr_box)
 
         run_row = QVBoxLayout()
@@ -182,6 +232,59 @@ class ControlsPanel(QWidget):
     def _update_n_frames_enabled(self):
         self.n_frames_spin.setEnabled(
             self.scan_by_interval_check.isChecked() or self.force_periodic_check.isChecked()
+        )
+
+    def _on_batch_spin_changed(self, value):
+        self.batch_size_slider.blockSignals(True)
+        self.batch_size_slider.setValue(value)
+        self.batch_size_slider.blockSignals(False)
+        self._update_batch_risk()
+
+    def _on_batch_slider_changed(self, value):
+        self.batch_size_spin.blockSignals(True)
+        self.batch_size_spin.setValue(value)
+        self.batch_size_spin.blockSignals(False)
+        self._update_batch_risk()
+
+    def set_memory_capacity(self, free_bytes, total_bytes, is_gpu):
+        self._free_bytes = free_bytes
+        self._is_gpu = is_gpu
+        self._update_batch_risk()
+
+    def set_batch_cost_estimate(self, bytes_per_item):
+        self._bytes_per_item = bytes_per_item
+        self._update_batch_risk()
+
+    def _update_batch_risk(self):
+        mem_kind = "VRAM" if self._is_gpu else "RAM"
+        if self._bytes_per_item is None or not self._free_bytes:
+            self.batch_risk_label.setText(
+                f"Estimation {mem_kind} indisponible -- lancez un premier OCR pour calibrer."
+            )
+            self.batch_risk_label.setStyleSheet(
+                "background-color: #555555; color: white; padding: 4px; border-radius: 3px;"
+            )
+            return
+
+        n = self.batch_size_spin.value()
+        estimated = self._bytes_per_item * n
+        ratio = estimated / self._free_bytes
+
+        if ratio <= 0.5:
+            color, level = "#2ecc71", "Confortable"
+        elif ratio <= 0.75:
+            color, level = "#f1c40f", "Correct"
+        elif ratio <= 1.0:
+            color, level = "#e67e22", "Risqué"
+        else:
+            color, level = "#e74c3c", "Manque probable de {}".format(mem_kind)
+
+        self.batch_risk_label.setText(
+            f"{level} -- environ {estimated / 1e9:.2f} Go {mem_kind} estimés pour ce "
+            f"batch ({self._free_bytes / 1e9:.2f} Go libres)"
+        )
+        self.batch_risk_label.setStyleSheet(
+            f"background-color: {color}; color: black; padding: 4px; border-radius: 3px;"
         )
 
     def set_image_mode(self, enabled):
