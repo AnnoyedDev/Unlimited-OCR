@@ -1,0 +1,23 @@
+[project]
+name = "unlimited-ocr-subtitler"
+version = "0.1.0"
+description = "OCR video -> .ass subtitles, powered by baidu/Unlimited-OCR"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "transformers==4.57.1",
+    "Pillow==12.1.1",
+    "einops==0.8.2",
+    "addict==2.4.0",
+    "easydict==1.13",
+    "tqdm",
+    "numpy",
+    "matplotlib",  # unused by our OCR path, but transformers' dynamic-module loader
+                   # statically requires every top-level import in modeling_unlimitedocr.py
+    "opencv-python-headless",
+    "PySide6",
+]
+# torch / torchvision are installed separately by install.py, since the
+# correct build (CUDA / ROCm / CPU) depends on the host OS and GPU vendor.
+
+[tool.uv]
+package = false
