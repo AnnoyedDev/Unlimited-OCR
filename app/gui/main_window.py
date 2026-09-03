@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self.filter_panel.pipelineChanged.connect(self._refresh_preview)
         self.controls_panel.runRequested.connect(self.start_ocr)
         self.controls_panel.stopRequested.connect(self.stop_ocr)
+        self.controls_panel.pauseToggled.connect(self.toggle_pause_ocr)
         self.controls_panel.exportRequested.connect(self.export_ass_dialog)
 
     @property
@@ -216,6 +217,7 @@ class MainWindow(QMainWindow):
                 retry_on_empty=self.controls_panel.retry_on_empty_check.isChecked(),
                 detect_italic=self.controls_panel.italic_check.isChecked(),
                 italic_angle_threshold=self.controls_panel.italic_threshold_spin.value(),
+                mega_batch=self.controls_panel.mega_batch_check.isChecked(),
             )
         else:
             worker = OcrWorker(
@@ -233,6 +235,7 @@ class MainWindow(QMainWindow):
                 retry_on_empty=self.controls_panel.retry_on_empty_check.isChecked(),
                 detect_italic=self.controls_panel.italic_check.isChecked(),
                 italic_angle_threshold=self.controls_panel.italic_threshold_spin.value(),
+                mega_batch=self.controls_panel.mega_batch_check.isChecked(),
             )
         thread = QThread(self)
         worker.moveToThread(thread)
@@ -253,6 +256,16 @@ class MainWindow(QMainWindow):
         if self._worker is not None:
             self._worker.stop()
             self.controls_panel.set_status("Arrêt demandé...")
+
+    def toggle_pause_ocr(self, paused):
+        if self._worker is None:
+            return
+        if paused:
+            self._worker.pause()
+            self.controls_panel.set_status("En pause...")
+        else:
+            self._worker.resume()
+            self.controls_panel.set_status("Reprise...")
 
     def _on_frame_result(self, analyzed):
         self._results.append(analyzed)

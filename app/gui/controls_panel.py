@@ -23,6 +23,7 @@ from ..video.italic import DEFAULT_ANGLE_THRESHOLD_DEG
 class ControlsPanel(QWidget):
     runRequested = Signal()
     stopRequested = Signal()
+    pauseToggled = Signal(bool)
     exportRequested = Signal()
 
     def __init__(self, parent=None):
@@ -86,19 +87,20 @@ class ControlsPanel(QWidget):
         self._bytes_per_item = None
 
         self.batch_size_spin = QSpinBox()
-        self.batch_size_spin.setRange(1, 32)
+        self.batch_size_spin.setRange(1, 96)
         self.batch_size_spin.setValue(4)
         self.batch_size_spin.setToolTip(
-            "Nombre d'images regroupées en un seul appel au modèle. Mesuré ~2,5x plus "
-            "rapide par image en batch de 8 vs une par une sur GPU. Plus haut = plus "
-            "rapide mais plus de mémoire GPU utilisée, et attendez un peu plus "
-            "longtemps entre deux résultats affichés (le batch se remplit avant "
-            "d'être envoyé). 1 = désactive le batching (comportement d'origine)."
+            "Nombre d'images regroupées avant d'être envoyées au modèle. En interne, "
+            "les appels réels au modèle sont toujours découpés par groupes de 8 max "
+            "(mosaïque ou non) -- au-delà de 8, augmenter cette valeur n'augmente donc "
+            "plus la VRAM utilisée par appel, mais réduit le nombre d'allers-retours "
+            "et augmente le délai avant d'afficher les premiers résultats (le batch se "
+            "remplit avant d'être envoyé). 1 = désactive le batching."
         )
         self.batch_size_spin.valueChanged.connect(self._on_batch_spin_changed)
 
         self.batch_size_slider = QSlider(Qt.Horizontal)
-        self.batch_size_slider.setRange(1, 32)
+        self.batch_size_slider.setRange(1, 96)
         self.batch_size_slider.setValue(4)
         self.batch_size_slider.valueChanged.connect(self._on_batch_slider_changed)
 
@@ -192,17 +194,39 @@ class ControlsPanel(QWidget):
         )
         ocr_form.addRow("  Seuil d'inclinaison :", self.italic_threshold_spin)
 
+        self.mega_batch_check = QCheckBox("Fusionner les images en mosaïque (expérimental)")
+        self.mega_batch_check.setChecked(False)
+        self.mega_batch_check.setToolTip(
+            "Combine jusqu'à 8 images en une seule mosaïque verticale (séparées par "
+            "des bandes marqueurs) envoyée en un seul appel au modèle, au lieu de "
+            "N appels/paddings séparés -- réduit fortement le travail de l'encodeur "
+            "visuel par lot. Si le découpage du résultat échoue (marqueurs non "
+            "retrouvés dans la sortie), le groupe concerné est automatiquement "
+            "retraité image par image (méthode actuelle) -- aucun risque de texte "
+            "mélangé, seulement un gain de vitesse non garanti selon le contenu."
+        )
+        ocr_form.addRow(self.mega_batch_check)
+
         layout.addWidget(ocr_box)
+
+        self._paused = False
 
         run_row = QVBoxLayout()
         self.run_button = QPushButton("Lancer l'OCR")
         self.run_button.clicked.connect(self.runRequested.emit)
         run_row.addWidget(self.run_button)
 
+        pause_stop_row = QHBoxLayout()
+        self.pause_button = QPushButton("Mettre en pause")
+        self.pause_button.setEnabled(False)
+        self.pause_button.clicked.connect(self._on_pause_clicked)
+        pause_stop_row.addWidget(self.pause_button)
+
         self.stop_button = QPushButton("Arrêter")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stopRequested.emit)
-        run_row.addWidget(self.stop_button)
+        pause_stop_row.addWidget(self.stop_button)
+        run_row.addLayout(pause_stop_row)
         layout.addLayout(run_row)
 
         self.progress_bar = QProgressBar()
@@ -298,7 +322,16 @@ class ControlsPanel(QWidget):
     def set_running(self, running):
         self.run_button.setEnabled(not running)
         self.stop_button.setEnabled(running)
+        self.pause_button.setEnabled(running)
+        if not running:
+            self._paused = False
+            self.pause_button.setText("Mettre en pause")
         self.export_button.setEnabled(not running and self.results_list.count() > 0)
+
+    def _on_pause_clicked(self):
+        self._paused = not self._paused
+        self.pause_button.setText("Reprendre" if self._paused else "Mettre en pause")
+        self.pauseToggled.emit(self._paused)
 
     def set_progress(self, current, total):
         self.progress_bar.setMaximum(max(1, total))

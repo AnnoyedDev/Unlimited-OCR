@@ -23,24 +23,22 @@ def bgr_to_pil(frame):
     return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
 
-_DET_RE = re.compile(r"<\|det\|>([^<\s]+)(?:\s*\[[^\]]*\])?\s*<\|/det\|>(.*)", re.DOTALL)
+_DET_RE = re.compile(r"<\|det\|>([^<\s]+)(?:\s*\[[^\]]*\])?\s*<\|/det\|>", re.DOTALL)
 
 
 def strip_det_markup(text):
     blocks = []
-    for line in text.splitlines():
-        line = line.rstrip()
-        if not line:
-            continue
-        m = _DET_RE.match(line)
-        if m:
-            category, content = m.group(1).strip(), m.group(2).strip()
-            if category == "image":
-                continue
-            if content:
-                blocks.append(content)
-        else:
-            blocks.append(line)
+    pos = 0
+    pending_category = None
+    for m in _DET_RE.finditer(text):
+        chunk = text[pos:m.start()].strip()
+        if chunk and pending_category != "image":
+            blocks.append(chunk)
+        pending_category = m.group(1).strip()
+        pos = m.end()
+    tail = text[pos:].strip()
+    if tail and pending_category != "image":
+        blocks.append(tail)
     return "\n".join(blocks).strip().replace("\\n", "\\N")
 
 

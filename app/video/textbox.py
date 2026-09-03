@@ -1,3 +1,5 @@
+import re
+
 import cv2
 import numpy as np
 
@@ -62,6 +64,24 @@ def prepare_retry_crop(raw_crop_bgr, bbox):
 
 MAX_PLAUSIBLE_RETRY_LENGTH = 120
 _GARBAGE_MARKERS = ("<|det|>", "<img", "<td", "</tr", "<table", "\\hline", "\\]", "\\[", "[Non-Text]")
+_BLUR_REFUSAL_MARKERS = (
+    "too blurry to recognize",
+    "cannot recognize any text",
+    "unable to recognize",
+    "no text content",
+)
+_NUMBERED_LIST_RE = re.compile(r"(?:\d{1,3}\.\s*){6,}")
+
+
+def looks_like_structural_garbage(text):
+    if not text:
+        return False
+    if any(marker in text for marker in _GARBAGE_MARKERS):
+        return True
+    lowered = text.lower()
+    if any(marker in lowered for marker in _BLUR_REFUSAL_MARKERS):
+        return True
+    return bool(_NUMBERED_LIST_RE.search(text))
 
 
 def looks_like_garbage(text):
@@ -69,4 +89,4 @@ def looks_like_garbage(text):
         return False
     if len(text) > MAX_PLAUSIBLE_RETRY_LENGTH:
         return True
-    return any(marker in text for marker in _GARBAGE_MARKERS)
+    return looks_like_structural_garbage(text)

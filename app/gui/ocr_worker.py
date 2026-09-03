@@ -1,18 +1,48 @@
 import copy
+import threading
 
 from PySide6.QtCore import QObject, Signal
 
 from ..batch_advisor import finish_measurement, start_measurement
-from ..config import DEFAULT_OCR_PROMPT
+from ..config import DEFAULT_MAX_NEW_TOKENS, DEFAULT_OCR_PROMPT
 from ..subtitles.builder import AnalyzedFrame
 from ..subtitles.lang_filter import looks_like_unwanted_chinese
 from ..video.filters import FilterPipeline
 from ..video.italic import DEFAULT_ANGLE_THRESHOLD_DEG, detect_italic
+from ..video.mosaic import MAX_GROUP_SIZE, build_mosaic, split_mosaic_text
 from ..video.reader import VideoReader, crop_frame
 from ..video.similarity import DuplicateSkipper
-from ..video.textbox import find_bright_text_bbox, looks_like_garbage, prepare_retry_crop
+from ..video.textbox import (
+    find_bright_text_bbox,
+    looks_like_garbage,
+    looks_like_structural_garbage,
+    prepare_retry_crop,
+)
 
 _GAP_EPSILON = 0.05
+
+
+def _ocr_group_texts(engine, images, prompt, mega_batch):
+    if len(images) <= MAX_GROUP_SIZE:
+        return _ocr_one_group(engine, images, prompt, mega_batch)
+
+    results = []
+    for start in range(0, len(images), MAX_GROUP_SIZE):
+        results.extend(_ocr_one_group(engine, images[start:start + MAX_GROUP_SIZE], prompt, mega_batch))
+    return results
+
+
+def _ocr_one_group(engine, images, prompt, mega_batch):
+    if not mega_batch or len(images) < 2:
+        return engine.ocr_images_batch(images, prompt=prompt)
+
+    mosaic, markers = build_mosaic(images)
+    max_tokens = DEFAULT_MAX_NEW_TOKENS * len(images) + 20 * len(markers)
+    mosaic_text = engine.ocr_images_batch([mosaic], prompt=prompt, max_new_tokens=max_tokens)[0]
+    segments = split_mosaic_text(mosaic_text, len(images), markers)
+    if segments is None:
+        return engine.ocr_images_batch(images, prompt=prompt)
+    return segments
 
 
 class EngineManager:
@@ -55,6 +85,7 @@ class OcrWorker(QObject):
         retry_on_empty=True,
         detect_italic=False,
         italic_angle_threshold=DEFAULT_ANGLE_THRESHOLD_DEG,
+        mega_batch=False,
         parent=None,
     ):
         super().__init__(parent)
@@ -68,15 +99,25 @@ class OcrWorker(QObject):
         self.filter_chinese = filter_chinese
         self.force_periodic_check = force_periodic_check
         self.scan_by_interval = scan_by_interval
+        self.mega_batch = mega_batch
         self.batch_size = max(1, batch_size)
         self.retry_on_empty = retry_on_empty
         self.detect_italic = detect_italic
         self.italic_angle_threshold = italic_angle_threshold
         self._stop_requested = False
         self._calibrated = False
+        self._pause_event = threading.Event()
+        self._pause_event.set()
 
     def stop(self):
         self._stop_requested = True
+        self._pause_event.set()
+
+    def pause(self):
+        self._pause_event.clear()
+
+    def resume(self):
+        self._pause_event.set()
 
     def run(self):
         engine = None
@@ -102,7 +143,8 @@ class OcrWorker(QObject):
                 measuring = not self._calibrated
                 if measuring:
                     baseline = start_measurement(engine.device_info)
-                texts = engine.ocr_images_batch(list(pending_images), prompt=self.prompt)
+                texts = _ocr_group_texts(engine, list(pending_images), self.prompt, self.mega_batch)
+                texts = ["" if looks_like_structural_garbage(t) else t for t in texts]
                 if measuring:
                     used = finish_measurement(engine.device_info, baseline)
                     self._calibrated = True
@@ -144,6 +186,7 @@ class OcrWorker(QObject):
                 count = 0
                 last_ocr_index = -self.step
                 for info in reader.iter_frames(step=scan_step):
+                    self._pause_event.wait()
                     if self._stop_requested:
                         break
                     count += 1
@@ -200,6 +243,7 @@ class ImageSetOcrWorker(QObject):
         retry_on_empty=True,
         detect_italic=False,
         italic_angle_threshold=DEFAULT_ANGLE_THRESHOLD_DEG,
+        mega_batch=False,
         parent=None,
     ):
         super().__init__(parent)
@@ -214,11 +258,21 @@ class ImageSetOcrWorker(QObject):
         self.retry_on_empty = retry_on_empty
         self.detect_italic = detect_italic
         self.italic_angle_threshold = italic_angle_threshold
+        self.mega_batch = mega_batch
         self._stop_requested = False
         self._calibrated = False
+        self._pause_event = threading.Event()
+        self._pause_event.set()
 
     def stop(self):
         self._stop_requested = True
+        self._pause_event.set()
+
+    def pause(self):
+        self._pause_event.clear()
+
+    def resume(self):
+        self._pause_event.set()
 
     def run(self):
         engine = None
@@ -251,7 +305,8 @@ class ImageSetOcrWorker(QObject):
                 measuring = not self._calibrated
                 if measuring:
                     baseline = start_measurement(engine.device_info)
-                texts = engine.ocr_images_batch(list(pending_images), prompt=self.prompt)
+                texts = _ocr_group_texts(engine, list(pending_images), self.prompt, self.mega_batch)
+                texts = ["" if looks_like_structural_garbage(t) else t for t in texts]
                 if measuring:
                     used = finish_measurement(engine.device_info, baseline)
                     self._calibrated = True
@@ -287,6 +342,7 @@ class ImageSetOcrWorker(QObject):
 
             total = len(self.events)
             for i, event in enumerate(self.events):
+                self._pause_event.wait()
                 if self._stop_requested:
                     break
 
