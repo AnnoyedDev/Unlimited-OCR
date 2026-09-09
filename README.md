@@ -68,9 +68,9 @@ il réutilise ce qui a déjà été téléchargé.
 >
 > 1. Allez sur [huggingface.co/baidu/Unlimited-OCR](https://huggingface.co/baidu/Unlimited-OCR).
 > 2. Téléchargez **tout le repo** (pas juste un fichier — tous les poids, configs,
->    tokenizer, etc.), par exemple avec `huggingface-cli` :
+>    tokenizer, etc.), par exemple avec `hf` :
 >    ```
->    huggingface-cli download baidu/Unlimited-OCR --local-dir models/Unlimited-OCR
+>    hf download baidu/Unlimited-OCR --local-dir models/Unlimited-OCR
 >    ```
 >    ou via `git clone` (avec [Git LFS](https://git-lfs.com/) installé) :
 >    ```
