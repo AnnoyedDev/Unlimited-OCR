@@ -29,6 +29,7 @@ Ce document a deux parties :
 - **Une carte graphique** n'est pas obligatoire mais fortement recommandée : sans elle,
   le logiciel fonctionne quand même (sur le processeur, "CPU") mais l'OCR est bien plus
   lent (plusieurs secondes par image analysée au lieu d'un peu plus d'une seconde).
+- (Pour Nvidia) GTX 1xxx ou supérieur.
 
 Vous n'avez **rien d'autre à installer manuellement** (pas de CUDA, pas de ROCm à part
 entière, etc.) : le script d'installation fourni s'en charge en détectant votre matériel.
